@@ -1,0 +1,7 @@
+# Labs 00-03 need only these. Later labs (04+) will add their own extras.
+torch>=2.4
+numpy
+imageio
+pillow
+matplotlib
+tqdm
