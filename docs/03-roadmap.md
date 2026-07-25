@@ -34,14 +34,19 @@ all on PushWorld, all in minutes-to-an-hour per run.
 - **Demo:** four families rolling out the same trajectory side by side; MuJoCo dataset
   montage.
 
-## M3 — Robotics payoff #1: plan with a world model (lab 06 at scale)
+## M3 — Robotics payoff #1: LeWM vs DINO-WM (ACTIVE, chosen 2026-07-24)
 
-DINO-WM recipe on our own MuJoCo manipulation data: frozen DINOv2, small ViT dynamics
-head, CEM/MPC in latent space, goal-image conditioning. stable-worldmodel as reference,
-implementation ours.
+Two stages. **(a)** Implement LeWM from scratch via the [lab 06
+skeleton](../labs/lab06_lewm/) — SIGReg, AdaLN conditioning, end-to-end loss, CEM are
+hand-written and check-verified, including the λ=0 collapse ablation. **(b)** The open
+question nobody has tested: does LeWM's single 192-dim token survive *contact-rich
+manipulation*? Train our LeWM and a DINO-WM baseline (frozen DINOv2 via
+stable-worldmodel, same data, same CEM protocol) on our own MuJoCo Franka/Unitree
+trajectories and compare goal-image planning success vs precision.
 
 - **Demo:** robot arm reaching/pushing to a goal *image* — planned entirely inside the
-  world model, executed in MuJoCo; side panel shows the model's imagined plan vs execution.
+  world model, executed in MuJoCo; side panel shows the model's imagined plan vs
+  execution; head-to-head success table LeWM vs DINO-WM.
 
 ## M4 — Robotics payoff #2: V-JEPA 2-AC-style post-training (flagship)
 

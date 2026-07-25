@@ -16,11 +16,15 @@ directory has its own README explaining the idea, the expected result, and the d
 | 03 — imagination | Actor-critic trained purely inside the frozen lab-02 model | Agent solving the env; real-env return curve vs model-free baseline |
 | 04 — tokens | VQ tokenizer + autoregressive transformer dynamics | Token-space rollout GIF; tokens/sec vs lab-02 |
 | 05 — few-step diffusion | Diffusion dynamics head; then cut denoise steps (shortcut-style) | Fidelity vs steps grid: 1/2/4/8-step rollouts side by side |
-| 06 — JEPA + MPC | Frozen pretrained encoder (DINOv2), small dynamics head, CEM planner | Goal-reaching demo: plan in embedding space, execute in env |
+| [06 — LeWM (JEPA + MPC)](lab06_lewm/) | End-to-end JEPA with SIGReg anti-collapse; CEM planning to image goals | Goal-reaching demo + the λ=0 collapse ablation |
 | 07 — evaluation | Drift, memory, physics probes + the functional test | Eval dashboard comparing labs 01–06 on one page |
 
-Status: **lab 00 implemented**; 01–07 are specced here and built as the
-[reading path](../docs/01-reading-path.md) reaches them.
+Status: **lab 00 implemented**; **lab 06 is a do-it-yourself skeleton** — four core
+components blanked with hints and self-checks ([lab06_lewm/README.md](lab06_lewm/README.md));
+the rest are specced here and built as the [reading path](../docs/01-reading-path.md)
+reaches them. Lab 06 jumps the queue because it feeds the
+[LeWM-vs-DINO-WM project](../docs/03-roadmap.md) (M3/M4); it originally specced a frozen
+DINOv2 encoder — that variant returns as the *baseline* in the comparison stage.
 
 ## Why this ladder
 

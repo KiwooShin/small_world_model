@@ -25,21 +25,22 @@ from labs.lab00_dynamics.env import PushWorld
 
 def collect_pushworld(root: str | pathlib.Path, episodes: int = 400, steps: int = 64,
                       seed: int = 0) -> pathlib.Path:
-    """Collect random-policy PushWorld episodes as .npz files under `root`.
+    """Collect PushWorld episodes as .npz files under `root`.
 
-    Random actions are fine here: LeWM trains on offline trajectories and the
-    paper's datasets are exploratory, not expert. ~400 x 64 steps trains a
-    smoke-test model; scale up once your implementation passes the checks.
+    Uses the env's weakly ball-seeking scripted policy so trajectories contain
+    contact events — LeWM's datasets are likewise "exploratory or pseudo-expert,
+    as long as they sufficiently cover the environment dynamics" (App. E).
+    ~400 x 64 steps trains a smoke-test model; scale up once your
+    implementation passes the checks.
     """
     root = pathlib.Path(root)
     root.mkdir(parents=True, exist_ok=True)
-    rng = np.random.default_rng(seed)
     env = PushWorld(seed=seed)
     for ep in range(episodes):
         obs = [env.reset()]
         acts = []
         for _ in range(steps):
-            a = rng.uniform(-1.0, 1.0, size=2).astype(np.float32)
+            a = env.scripted_action().astype(np.float32)
             obs.append(env.step(a))
             acts.append(a)
         np.savez_compressed(
