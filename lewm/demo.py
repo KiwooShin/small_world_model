@@ -317,12 +317,15 @@ def main() -> None:
 
     heroes = [e for e in eps if e["success"] and len(e["live"]) >= 8]
     hero = max(heroes or eps, key=lambda e: e["start_dist"])
-    _save_gif(compose_hero(hero), MEDIA / "lewm_hero.gif")
+    _save_gif(compose_hero(hero), MEDIA / f"lewm_{env_name}_hero.gif")
     grid_eps = sorted(eps, key=lambda e: not e["success"])[:4]
-    _save_gif(compose_grid(grid_eps), MEDIA / "lewm_reacher_demo.gif")
+    _save_gif(compose_grid(grid_eps), MEDIA / f"lewm_{env_name}_grid.gif")
 
     if args.collapse_ckpt.exists():
-        collapse_figure(str(args.ckpt), str(args.collapse_ckpt))
+        import torch as _t
+        cb = _t.load(args.collapse_ckpt, map_location="cpu")
+        if cb.get("env", "reacher") == env_name:   # never mix envs in one figure
+            collapse_figure(str(args.ckpt), str(args.collapse_ckpt))
 
 
 if __name__ == "__main__":
