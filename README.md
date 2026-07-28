@@ -1,92 +1,73 @@
 # small_world_model
 
-World models, learned from first principles and built small: every model in this repo is
-implemented from scratch, heavily commented, and trained on a single NVIDIA DGX Spark. The
-project walks from a 1.4M-param naive dynamics model up to frozen-backbone robot-manipulation
-world models with latent-space planning — with a demo video for every milestone.
+World models, learned from first principles and built small: everything in this repo is
+implemented from scratch, heavily commented, and trained on a single NVIDIA DGX Spark.
+The centerpiece is a from-scratch **LeWorldModel** (LeWM, [arXiv:2603.19312](https://arxiv.org/abs/2603.19312))
+trained on MuJoCo robot tasks and evaluated by goal-image planning — with a demo artifact
+for every milestone.
 
-**Why small?** The strongest compute-per-result recipes of 2025–26 are small: Drama matches
-30M-param IRIS at 7M params, LeWM trains a stable pixel JEPA at 15M params in hours on one
-GPU, and V-JEPA 2-AC gets zero-shot real-robot manipulation by training only a 300M head over
-a frozen encoder. Small is not the compromise — it's the interesting regime. The full argument,
-with sources: [docs/02-small-wm-frontier-2026.md](docs/02-small-wm-frontier-2026.md).
+**Why LeWM?** The strongest compute-per-result recipes of 2025–26 are small: LeWM trains a
+stable pixel JEPA end-to-end at ~15M params in hours on one GPU — no frozen backbone, no
+stop-gradient, no EMA teacher; a single statistical regularizer (SIGReg) replaces all of
+them — and it beats DINO-WM on Push-T while planning up to 48× faster. Small is not the
+compromise — it's the interesting regime. The full argument, with sources:
+[docs/02-small-wm-frontier-2026.md](docs/02-small-wm-frontier-2026.md).
 
-## Milestone demos
+## Milestones
 
-| | Milestone | Demo |
-|---|---|---|
-| ✅ | **M0** — naive pixel dynamics + compounding-error demo | below |
-| ⬜ | **M1** — RSSM + policy learned purely in imagination | labs 01–03 |
-| ⬜ | **M2** — tokens vs diffusion bake-off + MuJoCo data engine | labs 04–05 |
-| ⬜ | **M3** — plan robot manipulation with DINO-WM-style MPC | lab 06 at scale |
-| ⬜ | **M4** — V-JEPA 2-AC-style post-training on our own robot data | flagship |
-| ⬜ | **M5** — LoRA a pretrained generative WM → photoreal robot dreams | |
+| | Milestone |
+|---|---|
+| ✅ | **M0** — study foundation: field map, reading path, research sweep ([docs/](docs/)) |
+| 🔨 | **M1** — LeWM from scratch on a simple MuJoCo task ([lewm/](lewm/)): train, plan, score |
+| ⬜ | **M2** — scale the task ladder: reacher → pushing → Franka/Unitree assembly scenes |
+| ⬜ | **M3** — the open question: LeWM vs DINO-WM on contact-rich manipulation, same data, same CEM protocol |
+| ⬜ | **M4** — V-JEPA 2-AC-style post-training on our own robot data |
+| ⬜ | **M5** — LoRA a pretrained generative WM → photoreal robot dreams |
 
-Full plan: [docs/03-roadmap.md](docs/03-roadmap.md).
+Full plan: [docs/03-roadmap.md](docs/03-roadmap.md). (An earlier incremental "labs ladder"
+— including the pixel-dynamics compounding-error demo — lives in git history before
+2026-07-28; its verified LeWM components became [lewm/](lewm/).)
 
-### M0 — the problem every world model exists to solve
+## The model in one diagram
 
-![lab00 rollout](media/lab00_rollout.gif)
+```
+frames (B,T,3,64,64) ──ViT-Tiny──► CLS ──MLP+BN──► z_t ∈ R^192      (one token per frame)
+actions (B,T,A)      ──MLP──────────────────────► a_t ∈ R^192
+(z, a) history ──causal transformer, AdaLN-zero action conditioning──► ẑ_{t+1}
 
-A 1.4M-param action-conditioned conv net predicts the next frame of a 2D pushing environment.
-One-step prediction is near-perfect (39 dB PSNR) — but roll it out autoregressively (red
-border) and errors compound: the ball smears, physics quietly dies, PSNR halves within ~10
-steps. Every architecture in this repo's ladder is a repair for what this GIF shows.
+L = ||ẑ_{t+1} − z_{t+1}||²  +  λ · SIGReg(z)          λ = 0.09, targets NOT detached
+        prediction              anti-collapse: Epps–Pulley test of z against N(0,I)
+                                on random 1-D projections (sketched Cramér–Wold)
 
-![lab00 psnr](media/lab00_psnr.png)
+Planning: encode goal image once, CEM over action sequences through latent rollouts,
+cost = MSE to goal latent at the last step. No decoder anywhere.
+```
 
 ## Repo layout
 
 | Where | What |
 |---|---|
+| [`lewm/`](lewm/) | The LeWM implementation: model, SIGReg, MuJoCo envs, training, CEM planning/eval |
 | [`docs/`](docs/) | Field map ([00](docs/00-landscape-2026.md)), reading path ([01](docs/01-reading-path.md)), frontier/efficiency research sweep ([02](docs/02-small-wm-frontier-2026.md)), roadmap ([03](docs/03-roadmap.md)) |
-| [`labs/`](labs/) | The implementation ladder — each lab adds exactly one idea |
 | [`notes/`](notes/) | Per-paper study notes ([template](notes/TEMPLATE.md)) |
 | [`media/`](media/) | Demo artifacts, one set per milestone |
 
-## The one-paragraph version
-
-A world model is a learned simulator: given the current state of an environment and an action,
-it predicts what happens next. That single idea splits into four families that disagree about
-*what "next" should be predicted in* — pixels, discrete tokens, a compact stochastic latent, or
-an abstract embedding that was never trained to reconstruct anything. Each choice buys
-something (fidelity, controllability, compute, sample-efficiency) and costs something else.
-Most of the 2024–2026 literature is that trade-off being renegotiated at larger scale. See
-[docs/00-landscape-2026.md](docs/00-landscape-2026.md).
-
-## The ladder
-
-Each lab is standalone and adds one idea. You should be able to read any lab top to bottom in
-one sitting.
-
-| Lab | Adds | Anchor paper |
-|---|---|---|
-| **00** | Action-conditioned prediction in pixel space; compounding rollout error | — (baseline) |
-| 01 | Learned latent space; predict in latent, decode for viewing | Ha & Schmidhuber 2018 |
-| 02 | Stochastic latent state, KL-balanced ELBO (RSSM) | PlaNet / DreamerV2–V3 |
-| 03 | Policy trained *inside* the model (imagination) | Dreamer |
-| 04 | Discrete tokens + autoregressive transformer | IRIS / Genie |
-| 05 | Diffusion / flow dynamics; shortcut forcing | DIAMOND / Dreamer 4 |
-| 06 | Predict embeddings, not pixels; plan with MPC | DINO-WM / V-JEPA 2-AC |
-| 07 | Evaluation: drift, memory, physics probes | WorldModelBench et al. |
-
-**Lab 00 is implemented and runnable.** Labs 01–07 are specified in
-[labs/README.md](labs/README.md) and get built as the reading reaches them.
-
-## Setup
+## Quick start
 
 ```bash
-cd small_world_model
 pip install -r requirements.txt
-python -m labs.lab00_dynamics.run --help
+python -m lewm.collect            # MuJoCo reacher episodes -> data/
+python -m lewm.train              # train LeWM; per-epoch collapse dashboard
+python -m lewm.train --lambd 0    # the ablation: watch collapse live
+python -m lewm.eval               # CEM goal-image planning -> success rate
 ```
 
-Developed against Python 3.13 / PyTorch 2.11+cu128 on an NVIDIA GB10 (DGX Spark, 121 GB
-unified memory). Nothing in labs 00–03 needs more than a few GB; the point of "small" in the
-repo name is that every lab should train in minutes, not days.
+Developed against Python 3.13 / PyTorch 2.11+cu128 / MuJoCo 3.11 (EGL, headless) on an
+NVIDIA GB10 (DGX Spark, 121 GB unified memory). Everything trains in minutes-to-hours;
+that's the point of "small" in the repo name.
 
 ## Working notes
 
 Paper notes go in [`notes/`](notes/), one file per paper, using
-[notes/TEMPLATE.md](notes/TEMPLATE.md). The template asks for the thing that is easy to skip
-and most worth writing down: *what would break if you removed this paper's one idea.*
+[notes/TEMPLATE.md](notes/TEMPLATE.md). The template asks for the thing that is easy to
+skip and most worth writing down: *what would break if you removed this paper's one idea.*

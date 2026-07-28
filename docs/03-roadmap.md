@@ -2,77 +2,58 @@
 
 Goal of the project: demonstrate, with working code and demo videos, four things —
 **(1)** studied understanding of world models, **(2)** ability to build and train them,
-**(3)** application to robotics, **(4)** serious treatment of efficiency (everything runs on
-one DGX Spark). Every milestone ends in a fancy, self-explanatory demo GIF in the README.
+**(3)** application to robotics, **(4)** serious treatment of efficiency (everything runs
+on one DGX Spark). Every milestone ends in a demo artifact in the README.
 
-The recipes and feasibility numbers behind these choices are in
+*Restructured 2026-07-28: the incremental labs ladder was retired (git history has it);
+the project now centers on one model — LeWM — taken from a simple MuJoCo task toward
+contact-rich manipulation.* Recipes and feasibility numbers behind these choices:
 [02-small-wm-frontier-2026.md](02-small-wm-frontier-2026.md).
 
-## M0 — Study foundation + lab ladder begins ✅ (started 2026-07-24)
+## M0 — Study foundation ✅ (2026-07-24)
 
-- Landscape map, reading path, notes system ([docs/](.), [notes/](../notes/))
-- Lab 00 running: naive pixel dynamics, compounding-error demo
-- **Demo:** GT vs imagination vs error GIF; PSNR-vs-horizon curve (39 dB → 21 dB over 60 steps)
+Landscape map, reading path, research sweep (frontier labs, small/efficient WMs, DGX
+Spark constraints), notes system. LeWM implementation components (SIGReg, AdaLN-zero
+predictor, end-to-end loss, CEM) written and verified against the papers and both public
+codebases.
 
-## M1 — The core ideas, from scratch (labs 01–03)
+## M1 — LeWM on a simple MuJoCo task 🔨 (active)
 
-Latent prediction → RSSM with stochastic state → actor-critic trained purely in imagination,
-all on PushWorld, all in minutes-to-an-hour per run.
+From-scratch LeWM ([lewm/](../lewm/)) trained on a 2-DoF MuJoCo reacher from pixels:
+offline episodes from a scripted policy, per-epoch collapse dashboard (pred / sigreg /
+lat_std / eff_rank), CEM goal-image planning eval with success-rate scores, and the λ=0
+collapse ablation.
 
-- **Demo:** one context, N sampled imagined futures fanning out (the "stochastic latent"
-  money shot); agent solving PushWorld having never trained in the real env, with a
-  real-env return curve vs a model-free baseline.
-- Study phases 0–1 complete (Ha & Schmidhuber → DreamerV3), notes written.
+- **Demo:** training curves; goal-image planning GIF (goal | imagination | execution);
+  success-rate table incl. the collapsed model as the control.
 
-## M2 — Architecture bake-off (labs 04–05) + MuJoCo data engine
+## M2 — Scale the task ladder
 
-- Tokens+transformer and few-step diffusion dynamics on the same env/budget; the
-  fidelity-vs-steps grid (1/2/4/8 denoise steps) is the efficiency demo.
-- In parallel: a MuJoCo data engine reusing the existing Unitree/Franka assembly assets —
-  scripted policies dumping unlimited (RGB, proprio, action) trajectories, native on the
-  Spark. This is the dataset for M3–M5.
-- **Demo:** four families rolling out the same trajectory side by side; MuJoCo dataset
-  montage.
+Same model, harder MuJoCo scenes: planar pushing (first contact dynamics), then the
+existing Franka/Unitree assembly assets as the data engine. Add the paper's frame-skip-5
+action blocks, tune data volume/epochs per task. This is where "does one 192-dim token
+survive contact?" starts getting an answer.
 
-## M3 — Robotics payoff #1: LeWM vs DINO-WM (ACTIVE, chosen 2026-07-24)
+- **Demo:** per-task success table; side-by-side plans on easy vs contact-rich tasks.
 
-Two stages. **(a)** Implement LeWM from scratch via the [lab 06
-skeleton](../labs/lab06_lewm/) — SIGReg, AdaLN conditioning, end-to-end loss, CEM are
-hand-written and check-verified, including the λ=0 collapse ablation. **(b)** The open
-question nobody has tested: does LeWM's single 192-dim token survive *contact-rich
-manipulation*? Train our LeWM and a DINO-WM baseline (frozen DINOv2 via
-stable-worldmodel, same data, same CEM protocol) on our own MuJoCo Franka/Unitree
-trajectories and compare goal-image planning success vs precision.
+## M3 — LeWM vs DINO-WM, head to head
 
-- **Demo:** robot arm reaching/pushing to a goal *image* — planned entirely inside the
-  world model, executed in MuJoCo; side panel shows the model's imagined plan vs
-  execution; head-to-head success table LeWM vs DINO-WM.
+The open question nobody has tested: end-to-end 192-dim LeWM vs frozen-DINOv2 patch-grid
+DINO-WM on *contact-rich manipulation*, same data, same CEM protocol
+(stable-worldmodel as the DINO-WM reference). Either outcome is a finding.
 
-## M4 — Robotics payoff #2: V-JEPA 2-AC-style post-training (flagship)
+- **Demo:** head-to-head success/precision table; where each fails, shown.
 
-The strongest compute-for-result recipe of 2026, replicated on our data: frozen video
-encoder (V-JEPA 2 ViT-L or DINOv2), block-causal action-conditioned predictor
-(~100–300M — sized to what the Spark trains in days), teacher forcing + rollout loss, CEM
-planning. Meta needed <62 h of robot video; our MuJoCo engine generates that in a weekend.
+## M4 — V-JEPA 2-AC-style post-training
 
-- **Demo:** zero-shot manipulation in *held-out* MuJoCo scenes via latent planning;
-  comparison table vs M3 (success rate, planning time per action).
+Frozen video encoder + block-causal action-conditioned predictor (~100–300M) on our
+MuJoCo data; zero-shot planning in held-out scenes. The strongest compute-for-result
+recipe of 2026, replicated.
 
-## M5 — Efficiency + generative story: LoRA a pretrained WM
+## M5 — Efficiency + generative story
 
-LoRA Cosmos-Predict2.5-2B (official ~50M-param recipe; ≈3–4 Spark-days; needs the
-documented aarch64 patches — SDPA instead of flash-attn/TE) or SANA-WM 2.6B on our robot
-videos → photoreal "dreams" of the Unitree/Franka. Optionally close the loop
-WorldEval-style: evaluate an M3/M4 policy inside the finetuned generative model.
-
-- **Demo:** the fancy one — photoreal imagined robot futures next to the MuJoCo ground
-  truth; plus an honest efficiency table (params trained, wall-clock, memory, FPS) across
-  M1→M5.
-
-## M6 (stretch) — Evaluation dashboard (lab 07)
-
-Drift, memory persistence, physics probes, and the functional test (policy/plan success)
-applied uniformly to every model built in M1–M5. One page, one artifact.
+LoRA Cosmos-Predict2.5-2B or SANA-WM on our robot videos → photoreal robot dreams;
+honest efficiency table (params, wall-clock, memory, FPS) across everything built.
 
 ---
 
@@ -81,5 +62,6 @@ applied uniformly to every model built in M1–M5. One page, one artifact.
 - Single DGX Spark; BF16 (+FP8) training; SDPA everywhere; no flash-attn/TE/xformers.
 - MuJoCo for data (native aarch64). Unreal Engine only if a second x86 machine appears;
   photorealism via transfer models otherwise.
-- Every milestone: README GIF + a short "what this shows" caption. Small models,
+- Every milestone: README artifact + a short "what this shows" caption. Small models,
   full understanding — no cluster jobs.
+- Push to remote after every meaningful change.
