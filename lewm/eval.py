@@ -26,7 +26,7 @@ import pathlib
 import numpy as np
 import torch
 
-from .envs.reacher import Reacher
+from .envs import make
 from .model import LeWM
 from .planner import CEMConfig, CEMPlanner
 
@@ -34,15 +34,15 @@ MEDIA = pathlib.Path("media")
 
 
 @torch.no_grad()
-def evaluate(model: LeWM, episodes: int = 25, budget: int = 50,
-             replan_every: int = 4, success_dist: float = 0.05,
-             seed: int = 42, device: str = "cuda",
+def evaluate(model: LeWM, env_name: str = "reacher", episodes: int = 25,
+             replan_every: int = 4, seed: int = 42, device: str = "cuda",
              gif_tag: str | None = None, baseline: str | None = None) -> dict:
     """baseline: None (plan with the model), 'zero' (no-op policy), or
     'random' (uniform actions). The baselines anchor every score against
     chance — if they score high, the task is broken, not the model."""
     planner = CEMPlanner(model, CEMConfig())
-    env = Reacher(seed=seed)
+    env = make(env_name, seed=seed)
+    budget, success_dist = env.EVAL_BUDGET, env.SUCCESS_DIST
     rng = np.random.default_rng(seed)
     t = lambda x: torch.as_tensor(np.array(x), dtype=torch.float32, device=device)
 
@@ -58,7 +58,7 @@ def evaluate(model: LeWM, episodes: int = 25, budget: int = 50,
         acts.append(np.zeros(env.action_dim, dtype=np.float32))  # placeholder
 
         _, goal_img, goal_tip = env.sample_goal()   # pose-space goal
-        start_dists.append(float(np.linalg.norm(env.fingertip - goal_tip)))
+        start_dists.append(float(np.linalg.norm(env.target_point - goal_tip)))
 
         ep_frames = []
         done = False
@@ -77,12 +77,12 @@ def evaluate(model: LeWM, episodes: int = 25, budget: int = 50,
                 ep_frames.append(frames[-1])
                 acts[-1] = a.astype(np.float32)
                 acts.append(np.zeros(env.action_dim, dtype=np.float32))
-                if np.linalg.norm(env.fingertip - goal_tip) < success_dist:
+                if np.linalg.norm(env.target_point - goal_tip) < success_dist:
                     done = True            # first-passage success
                     break
             if done:
                 break
-        d = float(np.linalg.norm(env.fingertip - goal_tip))
+        d = float(np.linalg.norm(env.target_point - goal_tip))
         dists.append(d)
         wins += done
         print(f"  ep {ep+1:2d}: {'success' if done else 'fail   '}  "
@@ -98,7 +98,7 @@ def evaluate(model: LeWM, episodes: int = 25, budget: int = 50,
           f"{result['success_rate']:.0%} ({wins}/{episodes})   "
           f"mean dist {result['mean_dist']:.3f} m (start {result['mean_start_dist']:.3f})   "
           f"median {result['median_dist']:.3f} m   "
-          f"(success threshold {success_dist} m, reach 0.23 m)")
+          f"(success threshold {success_dist} m)")
     if gif_tag and gif_rows:
         _write_gif(gif_rows, gif_tag)
     return result
@@ -127,6 +127,8 @@ def _write_gif(rows, tag: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", type=pathlib.Path, default="data/ckpt/reacher.pt")
+    ap.add_argument("--env", type=str, default=None,
+                    help="env name; defaults to the one stored in the ckpt")
     ap.add_argument("--episodes", type=int, default=25)
     ap.add_argument("--baseline", choices=["zero", "random"], default=None)
     ap.add_argument("--gif", action="store_true", default=True)
@@ -137,8 +139,9 @@ def main() -> None:
                  action_dim=blob.get("action_dim", 2)).to(dev).eval()
     model.load_state_dict(blob["model"])
     tag = args.ckpt.stem if (args.gif and not args.baseline) else None
-    evaluate(model, episodes=args.episodes, device=dev, gif_tag=tag,
-             baseline=args.baseline)
+    env_name = args.env or blob.get("env", "reacher")
+    evaluate(model, env_name=env_name, episodes=args.episodes, device=dev,
+             gif_tag=tag, baseline=args.baseline)
 
 
 if __name__ == "__main__":

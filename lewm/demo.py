@@ -28,7 +28,7 @@ import torch
 from PIL import Image, ImageDraw, ImageFont
 
 from .data import TrajectorySlices
-from .envs.reacher import Reacher
+from .envs import make
 from .model import LeWM
 from .planner import CEMConfig, CEMPlanner
 
@@ -89,11 +89,12 @@ class LatentIndex:
 
 # ------------------------------------------------------- episode capture ---
 
-def run_episode(model: LeWM, index: LatentIndex | None, env: Reacher,
-                rng: np.random.Generator, device: str, budget: int = 50,
-                replan_every: int = 4, success_dist: float = 0.05) -> dict:
+def run_episode(model: LeWM, index: LatentIndex | None, env,
+                rng: np.random.Generator, device: str,
+                replan_every: int = 4) -> dict:
     """One MPC episode, capturing hires frames + imagination + metrics."""
     planner = CEMPlanner(model, CEMConfig())
+    budget, success_dist = env.EVAL_BUDGET, env.SUCCESS_DIST
     t = lambda x: torch.as_tensor(np.array(x), dtype=torch.float32, device=device)
 
     env.reset()
@@ -108,7 +109,7 @@ def run_episode(model: LeWM, index: LatentIndex | None, env: Reacher,
     goal_hi = env.render_pose_demo(goal_qpos)
 
     live, imag, dists = [env.render_demo()], [], []
-    start_dist = float(np.linalg.norm(env.fingertip - goal_tip))
+    start_dist = float(np.linalg.norm(env.target_point - goal_tip))
     done, steps = False, 0
     for _ in range(0, budget, replan_every):
         ctx_f = t(frames[-model.history:]).permute(0, 3, 1, 2)
@@ -123,7 +124,7 @@ def run_episode(model: LeWM, index: LatentIndex | None, env: Reacher,
             live.append(env.render_demo())
             if index is not None:
                 imag.append(env.render_pose_demo(index.nearest(imagined[k])))
-            dists.append(float(np.linalg.norm(env.fingertip - goal_tip)))
+            dists.append(float(np.linalg.norm(env.target_point - goal_tip)))
             steps += 1
             if dists[-1] < success_dist:
                 done = True
@@ -288,7 +289,8 @@ def main() -> None:
     ap.add_argument("--ckpt", type=pathlib.Path, default="data/ckpt/reacher.pt")
     ap.add_argument("--collapse-ckpt", type=pathlib.Path,
                     default="data/ckpt/collapse.pt")
-    ap.add_argument("--data", type=str, default="data/reacher")
+    ap.add_argument("--env", type=str, default=None)
+    ap.add_argument("--data", type=str, default=None)
     ap.add_argument("--episodes", type=int, default=8,
                     help="episodes to run; best success becomes the hero")
     ap.add_argument("--seed", type=int, default=7)
@@ -300,8 +302,10 @@ def main() -> None:
                  action_dim=blob.get("action_dim", 2)).to(dev).eval()
     model.load_state_dict(blob["model"])
 
+    env_name = args.env or blob.get("env", "reacher")
+    args.data = args.data or f"data/{env_name}"
     index = LatentIndex(model, args.data, dev)
-    env = Reacher(seed=args.seed)
+    env = make(env_name, seed=args.seed)
     rng = np.random.default_rng(args.seed)
 
     eps = []

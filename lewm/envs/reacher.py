@@ -36,6 +36,7 @@ import numpy as np  # noqa: E402
 
 _XML = """
 <mujoco model="reacher2d">
+  <compiler angle="radian"/>
   <option timestep="0.01" gravity="0 0 0"/>
   <visual><headlight ambient="0.45 0.45 0.45" diffuse="0.55 0.55 0.55"/></visual>
   <worldbody>
@@ -71,6 +72,8 @@ ACTION_REPEAT = 5
 
 class Reacher:
     action_dim = 2
+    EVAL_BUDGET = 50
+    SUCCESS_DIST = 0.05
 
     def __init__(self, size: int = 64, seed: int | None = None,
                  demo_size: int = 256):
@@ -173,6 +176,11 @@ class Reacher:
     @property
     def fingertip(self) -> np.ndarray:
         return self.data.site_xpos[self._tip, :2].copy()
+
+    # what success is measured on (eval reads this generically)
+    @property
+    def target_point(self) -> np.ndarray:
+        return self.fingertip
 
     def get_state(self):
         return self.data.qpos.copy(), self.data.qvel.copy()
