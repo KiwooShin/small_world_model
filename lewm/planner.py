@@ -29,6 +29,10 @@ class CEMConfig:
     cost_steps: int = 1   # goal-MSE averaged over the last k imagined steps
                           # (k>1 shapes the cost when the horizon can't span
                           # the full goal distance)
+    probe: object = None  # optional (D+1, 2) linear map latent->task point;
+                          # cost becomes probed-point distance. DIAGNOSTIC
+                          # ONLY: the probe needs state labels offline, so
+                          # this is an upper bound, not goal-image planning.
 
 
 class CEMPlanner:
@@ -70,8 +74,16 @@ class CEMPlanner:
             fut = model.action_encoder(cand)
             z_roll = model.rollout(ctx_emb, ctx_act_emb, fut)
             k = min(cfg.cost_steps, z_roll.size(1))
-            cost = (z_roll[:, -k:] - z_goal.unsqueeze(1)).pow(2) \
-                .sum(dim=-1).mean(dim=1)                         # GoalMSE(k)
+            if cfg.probe is not None:
+                W = cfg.probe.to(dev)
+                aug = lambda z: torch.cat(
+                    [z, torch.ones(*z.shape[:-1], 1, device=dev)], dim=-1)
+                p_roll = aug(z_roll[:, -k:]) @ W
+                p_goal = (aug(z_goal) @ W).unsqueeze(1)
+                cost = (p_roll - p_goal).pow(2).sum(dim=-1).mean(dim=1)
+            else:
+                cost = (z_roll[:, -k:] - z_goal.unsqueeze(1)).pow(2) \
+                    .sum(dim=-1).mean(dim=1)                     # GoalMSE(k)
             elite = cand[cost.topk(cfg.elites, largest=False).indices]
             mean, std = elite.mean(dim=0), elite.std(dim=0) + 1e-6
         plan = mean.clamp(-1, 1)                 # official: return refit mean
