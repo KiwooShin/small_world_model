@@ -43,6 +43,38 @@ Planning: encode goal image once, CEM over action sequences through latent rollo
 cost = MSE to goal latent at the last step. No decoder anywhere.
 ```
 
+## Current results (campaign in progress, updated 2026-07-28)
+
+Goal-image planning, 25 episodes, success = target within 5 cm (first passage),
+always reported against chance baselines:
+
+| Reacher (pose goals, mean start 0.19 m) | success | mean final dist |
+|---|---|---|
+| LeWM + CEM (fs=1, 20 ep) | 12% | 0.175 m |
+| LeWM + CEM (fs=5 blocks, 20 ep) | 16% | 0.180 m |
+| collapsed control (λ=0) | 0% | 0.189 m |
+| zero-action baseline | 0% | 0.187 m |
+| random-action baseline | 0% | 0.184 m |
+
+| Pusher (contact, puck goals) | success | mean final dist |
+|---|---|---|
+| LeWM + CEM (fs=1, 30 ep) | 4% | 0.101 m |
+| zero / random baselines | 0% | 0.104 m |
+
+**What the numbers say so far.** The eval discriminates (all controls at 0%),
+the dynamics model is good (open-loop latent rollout error at 8 steps is only
+13% of the random-pair distance), and the bottleneck is **cost-surface
+geometry**: measured corr(latent distance, true distance) falls from 0.35
+within 5 cm to ~0.05 beyond 10 cm — SIGReg whitens the space globally, so
+distant goals provide no gradient and CEM optimizes noise (a 5-config
+planner sweep moved nothing: 8/8/4/4/4%). Frame-skip-5 action blocks — the
+official setting — attack exactly this by making goals latent-local; the
+first fs=5 run (16%) confirms direction but not magnitude. The open
+variable is training scale: the paper uses ~45× more gradient steps; a
+paper-scale run (2000 episodes × 60 epochs) is in flight. This section
+updates as the campaign progresses; every number above has a committed
+pipeline that reproduces it.
+
 ## Repo layout
 
 | Where | What |
