@@ -26,6 +26,9 @@ class CEMConfig:
     elites: int = 32      # top-k kept for refitting
     iters: int = 10       # refinement rounds
     var: float = 1.0      # initial sampling std (actions live in [-1, 1])
+    cost_steps: int = 1   # goal-MSE averaged over the last k imagined steps
+                          # (k>1 shapes the cost when the horizon can't span
+                          # the full goal distance)
 
 
 class CEMPlanner:
@@ -35,12 +38,15 @@ class CEMPlanner:
 
     @torch.no_grad()
     def plan(self, ctx_frames: torch.Tensor, ctx_actions: torch.Tensor,
-             goal_frame: torch.Tensor, return_rollout: bool = False):
+             goal_frame: torch.Tensor, return_rollout: bool = False,
+             warm_mean: torch.Tensor | None = None):
         """ctx_frames (H, 3, h, w), ctx_actions (H, A) — last row is a zero
         placeholder (the action at the newest frame is what we're choosing);
         goal_frame (3, h, w). Returns a (horizon, A) action plan; with
         return_rollout=True also the imagined latents (horizon, D) of that
-        plan — what the model *believes* will happen, used by demo videos."""
+        plan — what the model *believes* will happen, used by demo videos.
+        warm_mean (horizon, A): initialize the CEM mean from a previous
+        plan's tail instead of zeros (the official solver's warm_start)."""
         cfg, model = self.cfg, self.model
         dev = ctx_frames.device
         z_goal, _ = model.encode(
@@ -53,7 +59,8 @@ class CEMPlanner:
         ctx_act_emb = ctx_act_emb.expand(cfg.samples, -1, -1)
 
         a_dim = ctx_actions.size(-1)
-        mean = torch.zeros(cfg.horizon, a_dim, device=dev)
+        mean = (warm_mean.to(dev) if warm_mean is not None
+                else torch.zeros(cfg.horizon, a_dim, device=dev))
         std = torch.full((cfg.horizon, a_dim), cfg.var, device=dev)
         for _ in range(cfg.iters):
             cand = mean + std * torch.randn(
@@ -61,8 +68,10 @@ class CEMPlanner:
             cand[0] = mean                       # incumbent always evaluated
             cand = cand.clamp(-1, 1)
             fut = model.action_encoder(cand)
-            z_end = model.rollout(ctx_emb, ctx_act_emb, fut)[:, -1]
-            cost = (z_end - z_goal).pow(2).sum(dim=-1)           # GoalMSE
+            z_roll = model.rollout(ctx_emb, ctx_act_emb, fut)
+            k = min(cfg.cost_steps, z_roll.size(1))
+            cost = (z_roll[:, -k:] - z_goal.unsqueeze(1)).pow(2) \
+                .sum(dim=-1).mean(dim=1)                         # GoalMSE(k)
             elite = cand[cost.topk(cfg.elites, largest=False).indices]
             mean, std = elite.mean(dim=0), elite.std(dim=0) + 1e-6
         plan = mean.clamp(-1, 1)                 # official: return refit mean
