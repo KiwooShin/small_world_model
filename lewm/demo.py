@@ -354,7 +354,9 @@ def main() -> None:
     if args.collapse_ckpt.exists():
         import torch as _t
         cb = _t.load(args.collapse_ckpt, map_location="cpu")
-        if cb.get("env", "reacher") == env_name:   # never mix envs in one figure
+        if (cb.get("env", "reacher") == env_name
+                and cb.get("model_type") != "dinowm"
+                and blob.get("model_type") != "dinowm"):  # lewm histories only
             collapse_figure(str(args.ckpt), str(args.collapse_ckpt))
 
 
