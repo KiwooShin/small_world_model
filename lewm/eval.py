@@ -155,8 +155,13 @@ def main() -> None:
     args = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     blob = torch.load(args.ckpt, map_location=dev)
-    model = LeWM(history=blob.get("history_len", 3),
-                 action_dim=blob.get("action_dim", 2)).to(dev).eval()
+    if blob.get("model_type") == "dinowm":
+        from .dinowm import DinoWM
+        model = DinoWM(action_dim=blob.get("action_dim", 10),
+                       history=blob.get("history_len", 3)).to(dev).eval()
+    else:
+        model = LeWM(history=blob.get("history_len", 3),
+                     action_dim=blob.get("action_dim", 2)).to(dev).eval()
     model.load_state_dict(blob["model"])
     tag = args.ckpt.stem if (args.gif and not args.baseline) else None
     env_name = args.env or blob.get("env", "reacher")
