@@ -186,7 +186,8 @@ def _meter(draw, x, y, w, dist, start, thresh, success):
               f"dist {dist:.3f} m", font=_font(12), fill=TEXT)
 
 
-def compose_hero(ep: dict, size: int = 256) -> list[np.ndarray]:
+def compose_hero(ep: dict, size: int = 256,
+                 title: str = "LeWM — decoder-free world model, planning from pixels") -> list[np.ndarray]:
     gap, m = 8, 14
     w = 3 * size + 2 * gap + 2 * m
     title_h, label_h, strip_h, foot_h = 40, 24, 40, 22
@@ -197,8 +198,7 @@ def compose_hero(ep: dict, size: int = 256) -> list[np.ndarray]:
         j = min(i, n - 1)
         c = Image.new("RGB", (w, h), SURFACE)
         d = ImageDraw.Draw(c)
-        d.text((m, 11), "LeWM — decoder-free world model, planning from pixels",
-               font=_font(15, bold=True), fill=TEXT)
+        d.text((m, 11), title, font=_font(15, bold=True), fill=TEXT)
         d.text((w - m - 62, 13), f"t = {min(j, n - 2) + 1:2d}",
                font=_font(13), fill=TEXT_2)
         xs = [m, m + size + gap, m + 2 * (size + gap)]
@@ -226,7 +226,8 @@ def compose_hero(ep: dict, size: int = 256) -> list[np.ndarray]:
     return out
 
 
-def compose_grid(eps: list[dict], size: int = 256) -> list[np.ndarray]:
+def compose_grid(eps: list[dict], size: int = 256,
+                 title: str = "LeWM goal-image planning — 4 episodes") -> list[np.ndarray]:
     gap, m, label_h, meter_h = 8, 12, 22, 30
     cell_w = 2 * size + gap
     cell_h = label_h + size + meter_h
@@ -237,8 +238,7 @@ def compose_grid(eps: list[dict], size: int = 256) -> list[np.ndarray]:
     for i in range(n + 8):
         c = Image.new("RGB", (w, h), SURFACE)
         d = ImageDraw.Draw(c)
-        d.text((m, 6), "LeWM goal-image planning — 4 episodes",
-               font=_font(14, bold=True), fill=TEXT)
+        d.text((m, 6), title, font=_font(14, bold=True), fill=TEXT)
         for k, ep in enumerate(eps[:4]):
             j = min(i, len(ep["live"]) - 1)
             x = m + (k % 2) * (cell_w + gap)
@@ -347,9 +347,15 @@ def main() -> None:
     heroes = [e for e in eps if e["success"] and len(e["live"]) >= 8]
     hero = max(heroes or eps, key=lambda e: e["start_dist"])
     stem = args.ckpt.stem
-    _save_gif(compose_hero(hero), MEDIA / f"{stem}_hero.gif")
+    if blob.get("model_type") == "dinowm":
+        t_hero = "DINO-WM baseline — frozen DINOv2 patch world model, planning from pixels"
+        t_grid = "DINO-WM goal-image planning — 4 episodes"
+    else:
+        t_hero = "LeWM — decoder-free world model, planning from pixels"
+        t_grid = "LeWM goal-image planning — 4 episodes"
+    _save_gif(compose_hero(hero, title=t_hero), MEDIA / f"{stem}_hero.gif")
     grid_eps = sorted(eps, key=lambda e: not e["success"])[:4]
-    _save_gif(compose_grid(grid_eps), MEDIA / f"{stem}_grid.gif")
+    _save_gif(compose_grid(grid_eps, title=t_grid), MEDIA / f"{stem}_grid.gif")
 
     if args.collapse_ckpt.exists():
         import torch as _t
