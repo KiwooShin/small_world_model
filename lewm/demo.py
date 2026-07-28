@@ -90,47 +90,63 @@ class LatentIndex:
 # ------------------------------------------------------- episode capture ---
 
 def run_episode(model: LeWM, index: LatentIndex | None, env,
-                rng: np.random.Generator, device: str,
-                replan_every: int = 4) -> dict:
-    """One MPC episode, capturing hires frames + imagination + metrics."""
+                rng: np.random.Generator, device: str, frameskip: int = 1,
+                replan_every: int | None = None) -> dict:
+    """One MPC episode, capturing hires frames + imagination + metrics.
+    With frameskip fs > 1 the planner emits action BLOCKS (fs raw actions);
+    the imagination panel holds each imagined block-latent's NN frame for
+    the fs env steps it spans."""
     planner = CEMPlanner(model, CEMConfig())
-    budget, success_dist = env.EVAL_BUDGET, env.SUCCESS_DIST
+    fs = frameskip
+    budget_blocks = max(1, env.EVAL_BUDGET // fs)
+    success_dist = env.SUCCESS_DIST
+    if replan_every is None:
+        replan_every = 4 if fs == 1 else 1
     t = lambda x: torch.as_tensor(np.array(x), dtype=torch.float32, device=device)
+    a_raw = env.action_dim
 
     env.reset()
     frames = [env.render()]
-    acts = []
+    blocks = []
     for _ in range(model.history - 1):
-        a = rng.uniform(-0.5, 0.5, size=env.action_dim).astype(np.float32)
-        frames.append(env.step(a))
-        acts.append(a)
-    acts.append(np.zeros(env.action_dim, dtype=np.float32))
-    goal_qpos, goal_img64, goal_tip = env.sample_goal()  # pose-space goal
+        blk = rng.uniform(-0.5, 0.5, size=(fs, a_raw)).astype(np.float32)
+        for a in blk:
+            f = env.step(a)
+        frames.append(f)
+        blocks.append(blk.reshape(-1))
+    blocks.append(np.zeros(fs * a_raw, dtype=np.float32))
+    goal_qpos, goal_img64, goal_tip = env.sample_goal()
     goal_hi = env.render_pose_demo(goal_qpos)
 
     live, imag, dists = [env.render_demo()], [], []
     start_dist = float(np.linalg.norm(env.target_point - goal_tip))
-    done, steps = False, 0
-    for _ in range(0, budget, replan_every):
+    done, steps, executed = False, 0, 0
+    while executed < budget_blocks and not done:
+        n_exec = min(replan_every, budget_blocks - executed)
         ctx_f = t(frames[-model.history:]).permute(0, 3, 1, 2)
-        ctx_a = t(np.stack(acts[-model.history:]))
+        ctx_a = t(np.stack(blocks[-model.history:]))
         plan, imagined = planner.plan(ctx_f, ctx_a,
                                       t(goal_img64).permute(2, 0, 1),
                                       return_rollout=True)
-        for k, a in enumerate(plan[:replan_every].cpu().numpy()):
-            frames.append(env.step(a))
-            acts[-1] = a.astype(np.float32)
-            acts.append(np.zeros(env.action_dim, dtype=np.float32))
-            live.append(env.render_demo())
-            if index is not None:
-                imag.append(env.render_pose_demo(index.nearest(imagined[k])))
-            dists.append(float(np.linalg.norm(env.target_point - goal_tip)))
-            steps += 1
-            if dists[-1] < success_dist:
-                done = True
+        for k, blk in enumerate(plan[:n_exec].cpu().numpy()):
+            im = (env.render_pose_demo(index.nearest(imagined[k]))
+                  if index is not None else None)
+            for a in blk.reshape(fs, a_raw):
+                f = env.step(a)
+                live.append(env.render_demo())
+                if im is not None:
+                    imag.append(im)          # hold across the block's steps
+                dists.append(float(np.linalg.norm(env.target_point - goal_tip)))
+                steps += 1
+                if dists[-1] < success_dist:
+                    done = True
+                    break
+            frames.append(f)
+            blocks[-1] = blk.astype(np.float32)
+            blocks.append(np.zeros(fs * a_raw, dtype=np.float32))
+            executed += 1
+            if done:
                 break
-        if done:
-            break
     return {"goal": goal_hi, "live": live, "imag": imag, "dists": dists,
             "start_dist": start_dist, "success": done, "steps": steps,
             "success_dist": success_dist}
@@ -304,13 +320,14 @@ def main() -> None:
 
     env_name = args.env or blob.get("env", "reacher")
     args.data = args.data or f"data/{env_name}"
+    fs = blob.get("frameskip", 1)
     index = LatentIndex(model, args.data, dev)
     env = make(env_name, seed=args.seed)
     rng = np.random.default_rng(args.seed)
 
     eps = []
     for i in range(args.episodes):
-        ep = run_episode(model, index, env, rng, dev)
+        ep = run_episode(model, index, env, rng, dev, frameskip=fs)
         print(f"  ep {i+1}: {'success' if ep['success'] else 'fail'} "
               f"in {ep['steps']} steps (final {ep['dists'][-1]:.3f} m)")
         eps.append(ep)
