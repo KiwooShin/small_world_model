@@ -46,23 +46,32 @@ def collect(env, root: str | pathlib.Path, episodes: int, steps: int) -> pathlib
 
 
 class TrajectorySlices(Dataset):
-    """Training windows: obs [K+1, 3, H, W] float in [0,1], action [K, A].
-    K = number of prediction steps (history size); windows are every valid
-    start position of every episode."""
+    """Training windows: obs [K+1, 3, H, W] float in [0,1], action [K, fs*A].
 
-    def __init__(self, root: str | pathlib.Path, k: int):
+    With frameskip fs > 1 (the official LeWM setting is 5), frames are
+    strided by fs and the fs raw actions between kept frames concatenate
+    into one action BLOCK. This is not a data-efficiency trick — it is what
+    keeps goals latent-local: SIGReg whitens the latent space globally, so
+    latent distance saturates beyond a short radius (measured: corr with
+    true distance falls from 0.35 within 5 cm to ~0.05 past 10 cm), and a
+    goal must sit within a few MODEL steps to provide any cost gradient.
+    fs=5 turns a 40-env-step goal into an 8-block plan."""
+
+    def __init__(self, root: str | pathlib.Path, k: int, frameskip: int = 1):
         self.k = k
+        self.fs = frameskip
         self.files = sorted(pathlib.Path(root).glob("ep_*.npz"))
         if not self.files:
             raise FileNotFoundError(
                 f"no episodes under {root}; run `python -m lewm.collect` first")
         self.episodes = []
         self.index: list[tuple[int, int]] = []
+        span = k * frameskip
         for fi, f in enumerate(self.files):
             with np.load(f) as z:
                 self.episodes.append((z["obs"], z["action"]))
             t = self.episodes[-1][1].shape[0]
-            self.index += [(fi, s) for s in range(t - k + 1)]
+            self.index += [(fi, s) for s in range(t - span + 1)]
 
     def __len__(self) -> int:
         return len(self.index)
@@ -70,7 +79,8 @@ class TrajectorySlices(Dataset):
     def __getitem__(self, i: int):
         fi, s = self.index[i]
         obs, act = self.episodes[fi]
-        o = obs[s : s + self.k + 1].astype(np.float32) / 255.0
-        o = torch.from_numpy(o).permute(0, 3, 1, 2)
-        a = torch.from_numpy(act[s : s + self.k].copy())
-        return o, a
+        fs, k = self.fs, self.k
+        o = obs[s : s + k * fs + 1 : fs].astype(np.float32) / 255.0
+        o = torch.from_numpy(o).permute(0, 3, 1, 2)          # (k+1, 3, H, W)
+        a = act[s : s + k * fs].reshape(k, -1)               # (k, fs*A)
+        return o, torch.from_numpy(a.copy())

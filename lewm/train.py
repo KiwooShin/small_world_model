@@ -71,6 +71,7 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=1e-4)     # paper: 5e-5 @ 100 ep
     ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--history", type=int, default=3)
+    ap.add_argument("--frameskip", type=int, default=1)  # official LeWM: 5
     ap.add_argument("--env", type=str, default="reacher")
     ap.add_argument("--data", type=str, default=None)
     ap.add_argument("--tag", type=str, default=None)
@@ -81,7 +82,7 @@ def main() -> None:
 
     args.data = args.data or f"data/{args.env}"
     args.tag = args.tag or args.env
-    ds = TrajectorySlices(args.data, k=args.history)
+    ds = TrajectorySlices(args.data, k=args.history, frameskip=args.frameskip)
     dl = DataLoader(ds, batch_size=args.batch, shuffle=True, drop_last=True,
                     num_workers=4, pin_memory=True, persistent_workers=True)
 
@@ -131,7 +132,8 @@ def main() -> None:
     path = CKPT / f"{args.tag}.pt"
     torch.save({"model": model.state_dict(), "history": history,
                 "lambd": args.lambd, "action_dim": sample_act.shape[-1],
-                "history_len": args.history, "env": args.env}, path)
+                "history_len": args.history, "env": args.env,
+                "frameskip": args.frameskip}, path)
     print(f"saved {path}")
     _plot(history, args.tag, args.lambd)
 
