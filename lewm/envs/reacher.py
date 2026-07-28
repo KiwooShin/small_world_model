@@ -23,6 +23,13 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("MUJOCO_GL", "egl")
+# Force the NVIDIA EGL vendor. Without this, GLVND probes Mesa first, which
+# can't open /dev/dri (permission) and silently falls back to llvmpipe
+# SOFTWARE rendering — measured 3.3x slower and not the GPU. Found the
+# hard way; Reacher.__init__ verifies the renderer and refuses regressions.
+_NV_ICD = "/usr/share/glvnd/egl_vendor.d/10_nvidia.json"
+if os.path.exists(_NV_ICD):
+    os.environ.setdefault("__EGL_VENDOR_LIBRARY_FILENAMES", _NV_ICD)
 
 import mujoco  # noqa: E402
 import numpy as np  # noqa: E402
@@ -62,15 +69,35 @@ ACTION_REPEAT = 5
 class Reacher:
     action_dim = 2
 
-    def __init__(self, size: int = 64, seed: int | None = None):
+    def __init__(self, size: int = 64, seed: int | None = None,
+                 demo_size: int = 256):
         self.model = mujoco.MjModel.from_xml_string(_XML)
         self.data = mujoco.MjData(self.model)
         self.renderer = mujoco.Renderer(self.model, size, size)
+        self._demo_renderer = None      # lazily built; only eval/demos need it
+        self._demo_size = demo_size
         self.rng = np.random.default_rng(seed)
         self._tip = self.model.site("fingertip").id
         self._waypoint = np.zeros(2)
         self._steps_to_waypoint = 0
+        self._verify_gpu_rendering()
         self.reset()
+
+    def _verify_gpu_rendering(self) -> None:
+        """One-time check that EGL is on the GPU, not llvmpipe software."""
+        self.renderer.update_scene(self.data)
+        self.renderer.render()
+        try:
+            from OpenGL import GL
+            gl_renderer = GL.glGetString(GL.GL_RENDERER).decode()
+        except Exception:
+            return
+        if not hasattr(Reacher, "_gl_reported"):
+            Reacher._gl_reported = True
+            print(f"[reacher] OpenGL renderer: {gl_renderer}")
+            if "llvmpipe" in gl_renderer.lower():
+                print("[reacher] WARNING: SOFTWARE rendering — GPU EGL not "
+                      "active. Check __EGL_VENDOR_LIBRARY_FILENAMES.")
 
     # ------------------------------------------------------------- control --
 
@@ -92,6 +119,27 @@ class Reacher:
         """(H, W, 3) float32 in [0, 1]."""
         self.renderer.update_scene(self.data, camera="top")
         return self.renderer.render().astype(np.float32) / 255.0
+
+    def render_demo(self) -> np.ndarray:
+        """High-res render of the CURRENT state for demo videos. (H, W, 3) u8."""
+        if self._demo_renderer is None:
+            self._demo_renderer = mujoco.Renderer(
+                self.model, self._demo_size, self._demo_size)
+        self._demo_renderer.update_scene(self.data, camera="top")
+        return self._demo_renderer.render().copy()
+
+    def render_pose_demo(self, qpos: np.ndarray) -> np.ndarray:
+        """High-res render of an ARBITRARY pose, restoring state afterward.
+        Used to visualize imagined latents via nearest-neighbor retrieval:
+        LeWM has no decoder, so imagination panels re-render the dataset
+        state whose embedding is closest to each imagined latent."""
+        snap = self.get_state()
+        self.data.qpos[:] = qpos
+        self.data.qvel[:] = 0
+        mujoco.mj_forward(self.model, self.data)
+        img = self.render_demo()
+        self.set_state(snap)
+        return img
 
     # --------------------------------------------------------------- state --
 

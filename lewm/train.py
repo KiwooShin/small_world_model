@@ -134,22 +134,27 @@ def main() -> None:
 
 
 def _plot(history, tag: str, lambd: float) -> None:
+    """Dark-surface styling matching the demo videos (validated palette)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     MEDIA.mkdir(exist_ok=True)
     names = ["prediction MSE", "SIGReg statistic", "latent std", "effective rank"]
-    fig, axes = plt.subplots(1, 4, figsize=(14, 3))
+    fig, axes = plt.subplots(1, 4, figsize=(14, 3), facecolor="#1a1a19")
     for i, (ax, name) in enumerate(zip(axes, names)):
-        ax.plot([h[i] for h in history], color="#e06c2b")
-        ax.set_title(name, fontsize=10)
-        ax.set_xlabel("epoch", fontsize=8)
-        ax.grid(alpha=0.25)
-    fig.suptitle(f"LeWM training — {tag} (lambda={lambd})", fontsize=11)
+        ax.plot([h[i] for h in history], color="#3987e5", lw=2)
+        ax.set_title(name, fontsize=10, color="white")
+        ax.set_xlabel("epoch", fontsize=8, color="#c3c2b7")
+        ax.set_facecolor("#1a1a19")
+        ax.tick_params(colors="#c3c2b7", labelsize=8)
+        for s in ax.spines.values():
+            s.set_color("#3a3a38")
+        ax.grid(alpha=0.15, color="#c3c2b7")
+    fig.suptitle(f"LeWM training — {tag} (λ={lambd})", fontsize=11, color="white")
     fig.tight_layout()
     out = MEDIA / f"lewm_{tag}_curves.png"
-    fig.savefig(out, dpi=140)
+    fig.savefig(out, dpi=140, facecolor="#1a1a19")
     print(f"wrote {out}")
 
 

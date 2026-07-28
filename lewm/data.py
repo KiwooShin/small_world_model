@@ -25,14 +25,20 @@ def collect(env, root: str | pathlib.Path, episodes: int, steps: int) -> pathlib
     for ep in range(episodes):
         obs = [env.reset()]
         acts = []
+        qpos = [env.get_state()[0]]
         for _ in range(steps):
             a = env.scripted_action()
             obs.append(env.step(a))
             acts.append(a)
+            qpos.append(env.get_state()[0])
         np.savez_compressed(
             root / f"ep_{ep:05d}.npz",
             obs=(np.stack(obs) * 255).astype(np.uint8),
             action=np.stack(acts).astype(np.float32),
+            # Sim poses per frame — never used for training (pixels only);
+            # they exist so demo videos can visualize imagined latents by
+            # nearest-neighbor retrieval and crisp re-rendering.
+            qpos=np.stack(qpos).astype(np.float32),
         )
         if (ep + 1) % 50 == 0:
             print(f"  {ep + 1}/{episodes} episodes")

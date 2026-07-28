@@ -35,10 +35,12 @@ class CEMPlanner:
 
     @torch.no_grad()
     def plan(self, ctx_frames: torch.Tensor, ctx_actions: torch.Tensor,
-             goal_frame: torch.Tensor) -> torch.Tensor:
+             goal_frame: torch.Tensor, return_rollout: bool = False):
         """ctx_frames (H, 3, h, w), ctx_actions (H, A) — last row is a zero
         placeholder (the action at the newest frame is what we're choosing);
-        goal_frame (3, h, w). Returns a (horizon, A) action plan."""
+        goal_frame (3, h, w). Returns a (horizon, A) action plan; with
+        return_rollout=True also the imagined latents (horizon, D) of that
+        plan — what the model *believes* will happen, used by demo videos."""
         cfg, model = self.cfg, self.model
         dev = ctx_frames.device
         z_goal, _ = model.encode(
@@ -63,4 +65,9 @@ class CEMPlanner:
             cost = (z_end - z_goal).pow(2).sum(dim=-1)           # GoalMSE
             elite = cand[cost.topk(cfg.elites, largest=False).indices]
             mean, std = elite.mean(dim=0), elite.std(dim=0) + 1e-6
-        return mean.clamp(-1, 1)                 # official: return refit mean
+        plan = mean.clamp(-1, 1)                 # official: return refit mean
+        if not return_rollout:
+            return plan
+        fut = self.model.action_encoder(plan.unsqueeze(0))
+        imagined = self.model.rollout(ctx_emb[:1], ctx_act_emb[:1], fut)[0]
+        return plan, imagined
