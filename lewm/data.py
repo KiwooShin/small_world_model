@@ -67,11 +67,20 @@ class TrajectorySlices(Dataset):
         self.episodes = []
         self.index: list[tuple[int, int]] = []
         span = k * frameskip
-        for fi, f in enumerate(self.files):
-            with np.load(f) as z:
-                self.episodes.append((z["obs"], z["action"]))
-            t = self.episodes[-1][1].shape[0]
+        skipped = 0
+        for f in self.files:
+            try:
+                with np.load(f) as z:
+                    ep = (z["obs"], z["action"])
+            except Exception:
+                skipped += 1        # partially written / corrupt episode
+                continue
+            fi = len(self.episodes)
+            self.episodes.append(ep)
+            t = ep[1].shape[0]
             self.index += [(fi, s) for s in range(t - span + 1)]
+        if skipped:
+            print(f"[data] skipped {skipped} unreadable episode files")
 
     def __len__(self) -> int:
         return len(self.index)
