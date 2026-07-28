@@ -41,24 +41,27 @@ _XML = """
   <worldbody>
     <geom name="floor" type="plane" size="0.35 0.35 0.1" rgba="0.10 0.11 0.16 1"/>
     <camera name="top" pos="0 0 0.29" euler="0 0 0" fovy="90"/>
-    <body name="upper" pos="0 0 0.02">
-      <joint name="shoulder" type="hinge" axis="0 0 1" damping="0.06"/>
+    <!-- contype/conaffinity 0: a planar arm needs no contacts, and the tip
+         sphere otherwise penetrates the floor — the resulting friction
+         stalls the arm entirely (cost a full pipeline run to find). -->
+    <body name="upper" pos="0 0 0.03">
+      <joint name="shoulder" type="hinge" axis="0 0 1" damping="0.09"/>
       <geom type="capsule" fromto="0 0 0 0.12 0 0" size="0.018"
-            rgba="1.0 0.55 0.10 1" mass="0.05"/>
+            rgba="1.0 0.55 0.10 1" mass="0.05" contype="0" conaffinity="0"/>
       <body name="lower" pos="0.12 0 0">
         <joint name="elbow" type="hinge" axis="0 0 1" range="-2.6 2.6"
-               damping="0.06"/>
+               damping="0.09"/>
         <geom type="capsule" fromto="0 0 0 0.11 0 0" size="0.015"
-              rgba="1.0 0.80 0.25 1" mass="0.04"/>
+              rgba="1.0 0.80 0.25 1" mass="0.04" contype="0" conaffinity="0"/>
         <geom name="tip" type="sphere" pos="0.11 0 0" size="0.022"
-              rgba="0.15 0.85 0.95 1" mass="0.01"/>
+              rgba="0.15 0.85 0.95 1" mass="0.01" contype="0" conaffinity="0"/>
         <site name="fingertip" pos="0.11 0 0" size="0.005"/>
       </body>
     </body>
   </worldbody>
   <actuator>
-    <motor joint="shoulder" gear="0.035" ctrlrange="-1 1"/>
-    <motor joint="elbow"    gear="0.025" ctrlrange="-1 1"/>
+    <motor joint="shoulder" gear="0.09" ctrlrange="-1 1"/>
+    <motor joint="elbow"    gear="0.06" ctrlrange="-1 1"/>
   </actuator>
 </mujoco>
 """
@@ -140,6 +143,30 @@ class Reacher:
         img = self.render_demo()
         self.set_state(snap)
         return img
+
+    def sample_goal(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Sample a goal POSE a guaranteed-nontrivial distance from the
+        current pose and return (goal_qpos, goal_obs_64, goal_fingertip).
+
+        Goals live in pose space, not at the end of a short scripted rollout
+        — short rollouts barely move the arm, which once made the whole eval
+        vacuous (goals spawned inside the success radius; every policy,
+        including no-op, scored 100%). Found via the zero-action baseline;
+        the baselines stay in eval.py as permanent guards.
+        """
+        dq_s = self.rng.uniform(0.7, 1.6) * self.rng.choice([-1.0, 1.0])
+        goal = np.array([
+            self.data.qpos[0] + dq_s,
+            np.clip(self.data.qpos[1] + self.rng.uniform(-1.2, 1.2), -2.4, 2.4),
+        ])
+        snap = self.get_state()
+        self.data.qpos[:] = goal
+        self.data.qvel[:] = 0
+        mujoco.mj_forward(self.model, self.data)
+        img = self.render()
+        tip = self.fingertip
+        self.set_state(snap)
+        return goal, img, tip
 
     # --------------------------------------------------------------- state --
 

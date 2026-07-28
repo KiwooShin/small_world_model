@@ -34,16 +34,19 @@ MEDIA = pathlib.Path("media")
 
 
 @torch.no_grad()
-def evaluate(model: LeWM, episodes: int = 25, budget: int = 40,
-             goal_steps: int = 20, replan_every: int = 4,
-             success_dist: float = 0.05, seed: int = 42,
-             device: str = "cuda", gif_tag: str | None = None) -> dict:
+def evaluate(model: LeWM, episodes: int = 25, budget: int = 50,
+             replan_every: int = 4, success_dist: float = 0.05,
+             seed: int = 42, device: str = "cuda",
+             gif_tag: str | None = None, baseline: str | None = None) -> dict:
+    """baseline: None (plan with the model), 'zero' (no-op policy), or
+    'random' (uniform actions). The baselines anchor every score against
+    chance — if they score high, the task is broken, not the model."""
     planner = CEMPlanner(model, CEMConfig())
     env = Reacher(seed=seed)
     rng = np.random.default_rng(seed)
     t = lambda x: torch.as_tensor(np.array(x), dtype=torch.float32, device=device)
 
-    dists, wins, gif_rows = [], 0, []
+    dists, start_dists, wins, gif_rows = [], [], 0, []
     for ep in range(episodes):
         env.reset()
         frames = [env.render()]
@@ -53,40 +56,47 @@ def evaluate(model: LeWM, episodes: int = 25, budget: int = 40,
             frames.append(env.step(a))
             acts.append(a)
         acts.append(np.zeros(env.action_dim, dtype=np.float32))  # placeholder
-        snapshot = env.get_state()
 
-        for _ in range(goal_steps):                 # peek at a future state
-            env.step(env.scripted_action())
-        goal_img, goal_tip = env.render(), env.fingertip
-        env.set_state(snapshot)                     # and teleport back
+        _, goal_img, goal_tip = env.sample_goal()   # pose-space goal
+        start_dists.append(float(np.linalg.norm(env.fingertip - goal_tip)))
 
         ep_frames = []
         done = False
         for _ in range(0, budget, replan_every):
-            ctx_f = t(frames[-model.history:]).permute(0, 3, 1, 2)
-            ctx_a = t(np.stack(acts[-model.history:]))
-            plan = planner.plan(ctx_f, ctx_a, t(goal_img).permute(2, 0, 1))
-            for a in plan[:replan_every].cpu().numpy():
+            if baseline == "zero":
+                plan = np.zeros((replan_every, env.action_dim), dtype=np.float32)
+            elif baseline == "random":
+                plan = rng.uniform(-1, 1, (replan_every, env.action_dim)).astype(np.float32)
+            else:
+                ctx_f = t(frames[-model.history:]).permute(0, 3, 1, 2)
+                ctx_a = t(np.stack(acts[-model.history:]))
+                plan = planner.plan(ctx_f, ctx_a,
+                                    t(goal_img).permute(2, 0, 1)).cpu().numpy()
+            for a in plan[:replan_every]:
                 frames.append(env.step(a))
                 ep_frames.append(frames[-1])
                 acts[-1] = a.astype(np.float32)
                 acts.append(np.zeros(env.action_dim, dtype=np.float32))
-            if np.linalg.norm(env.fingertip - goal_tip) < success_dist:
-                done = True
+                if np.linalg.norm(env.fingertip - goal_tip) < success_dist:
+                    done = True            # first-passage success
+                    break
+            if done:
                 break
         d = float(np.linalg.norm(env.fingertip - goal_tip))
         dists.append(d)
         wins += done
         print(f"  ep {ep+1:2d}: {'success' if done else 'fail   '}  "
-              f"final dist {d:.3f} m")
+              f"start {start_dists[-1]:.3f} -> final {d:.3f} m")
         if gif_tag and ep < 4:
             gif_rows.append((goal_img, ep_frames))
 
     result = {"success_rate": wins / episodes,
               "mean_dist": float(np.mean(dists)),
-              "median_dist": float(np.median(dists))}
-    print(f"\nsuccess rate: {result['success_rate']:.0%} ({wins}/{episodes})   "
-          f"mean dist {result['mean_dist']:.3f} m   "
+              "median_dist": float(np.median(dists)),
+              "mean_start_dist": float(np.mean(start_dists))}
+    print(f"\n[{baseline or 'model'}] success rate: "
+          f"{result['success_rate']:.0%} ({wins}/{episodes})   "
+          f"mean dist {result['mean_dist']:.3f} m (start {result['mean_start_dist']:.3f})   "
           f"median {result['median_dist']:.3f} m   "
           f"(success threshold {success_dist} m, reach 0.23 m)")
     if gif_tag and gif_rows:
@@ -118,6 +128,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", type=pathlib.Path, default="data/ckpt/reacher.pt")
     ap.add_argument("--episodes", type=int, default=25)
+    ap.add_argument("--baseline", choices=["zero", "random"], default=None)
     ap.add_argument("--gif", action="store_true", default=True)
     args = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -125,8 +136,9 @@ def main() -> None:
     model = LeWM(history=blob.get("history_len", 3),
                  action_dim=blob.get("action_dim", 2)).to(dev).eval()
     model.load_state_dict(blob["model"])
-    tag = args.ckpt.stem if args.gif else None
-    evaluate(model, episodes=args.episodes, device=dev, gif_tag=tag)
+    tag = args.ckpt.stem if (args.gif and not args.baseline) else None
+    evaluate(model, episodes=args.episodes, device=dev, gif_tag=tag,
+             baseline=args.baseline)
 
 
 if __name__ == "__main__":

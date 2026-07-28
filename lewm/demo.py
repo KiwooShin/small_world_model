@@ -90,9 +90,8 @@ class LatentIndex:
 # ------------------------------------------------------- episode capture ---
 
 def run_episode(model: LeWM, index: LatentIndex | None, env: Reacher,
-                rng: np.random.Generator, device: str, budget: int = 40,
-                goal_steps: int = 20, replan_every: int = 4,
-                success_dist: float = 0.05) -> dict:
+                rng: np.random.Generator, device: str, budget: int = 50,
+                replan_every: int = 4, success_dist: float = 0.05) -> dict:
     """One MPC episode, capturing hires frames + imagination + metrics."""
     planner = CEMPlanner(model, CEMConfig())
     t = lambda x: torch.as_tensor(np.array(x), dtype=torch.float32, device=device)
@@ -105,12 +104,8 @@ def run_episode(model: LeWM, index: LatentIndex | None, env: Reacher,
         frames.append(env.step(a))
         acts.append(a)
     acts.append(np.zeros(env.action_dim, dtype=np.float32))
-    snapshot = env.get_state()
-    for _ in range(goal_steps):
-        env.step(env.scripted_action())
-    goal_img64, goal_tip = env.render(), env.fingertip
-    goal_hi = env.render_demo()
-    env.set_state(snapshot)
+    goal_qpos, goal_img64, goal_tip = env.sample_goal()  # pose-space goal
+    goal_hi = env.render_pose_demo(goal_qpos)
 
     live, imag, dists = [env.render_demo()], [], []
     start_dist = float(np.linalg.norm(env.fingertip - goal_tip))
