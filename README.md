@@ -43,37 +43,42 @@ Planning: encode goal image once, CEM over action sequences through latent rollo
 cost = MSE to goal latent at the last step. No decoder anywhere.
 ```
 
-## Current results (campaign in progress, updated 2026-07-28)
+## Results: the head-to-head (updated 2026-07-28, campaign day 1)
 
-Goal-image planning, 25 episodes, success = target within 5 cm (first passage),
-always reported against chance baselines:
+Goal-image planning on the MuJoCo reacher: 25 episodes, success = fingertip
+within 5 cm of the goal-image pose (first passage), mean start distance
+0.19 m. All models trained on the same 2000-episode / 300k-frame offline
+dataset (LeWM: 60 epochs fs=5, prediction MSE 0.004, effective rank 48).
 
-| Reacher (pose goals, mean start 0.19 m) | success | mean final dist |
-|---|---|---|
-| LeWM + CEM (fs=1, 20 ep) | 12% | 0.175 m |
-| LeWM + CEM (fs=5 blocks, 20 ep) | 16% | 0.180 m |
-| collapsed control (λ=0) | 0% | 0.189 m |
-| zero-action baseline | 0% | 0.187 m |
-| random-action baseline | 0% | 0.184 m |
+| Reacher | success | mean final dist | state |
+|---|---|---|---|
+| **DINO-WM baseline** (frozen DINOv2, patch grid) | **56%** | **0.076 m** | 49×384 patch tokens |
+| LeWM + probed-point cost *(diagnostic†)* | 28% | 0.085 m | 192-d token + linear readout |
+| LeWM + GoalMSE (the paper's cost) | 12% | 0.179 m | 192-d token |
+| collapsed control (λ=0) / zero / random | 0% | ≈ start | — |
 
-| Pusher (contact, puck goals) | success | mean final dist |
-|---|---|---|
-| LeWM + CEM (fs=1, 30 ep) | 4% | 0.101 m |
-| zero / random baselines | 0% | 0.104 m |
+† the probe needs offline state labels, so it is an upper bound, not pure
+goal-image planning.
 
-**What the numbers say so far.** The eval discriminates (all controls at 0%),
-the dynamics model is good (open-loop latent rollout error at 8 steps is only
-13% of the random-pair distance), and the bottleneck is **cost-surface
-geometry**: measured corr(latent distance, true distance) falls from 0.35
-within 5 cm to ~0.05 beyond 10 cm — SIGReg whitens the space globally, so
-distant goals provide no gradient and CEM optimizes noise (a 5-config
-planner sweep moved nothing: 8/8/4/4/4%). Frame-skip-5 action blocks — the
-official setting — attack exactly this by making goals latent-local; the
-first fs=5 run (16%) confirms direction but not magnitude. The open
-variable is training scale: the paper uses ~45× more gradient steps; a
-paper-scale run (2000 episodes × 60 epochs) is in flight. This section
-updates as the campaign progresses; every number above has a committed
-pipeline that reproduces it.
+**The finding.** LeWM's latent *contains* the state — a linear probe reads
+the fingertip position to 1.5 cm median error — but **GoalMSE cannot see
+it**: SIGReg whitens the space, latent distance decorrelates from task
+distance beyond ~5 cm (corr 0.35 → ~0.0), and the planner gets no gradient
+toward distant goals. Identical machinery with a probed-point cost halves
+the final distance (0.179 → 0.085 m). DINO-WM's spatially-structured patch
+grid is the natural fix — feature-MSE over patches preserves *where things
+are* — and wins outright at this scale. Chain of evidence that localized
+this (each step committed with its pipeline): honest-eval rebuild with
+chance baselines → 5-config CEM sweep (flat: planner exonerated) →
+open-loop rollout drift measurement (13% of random-pair distance at 8
+steps: dynamics exonerated) → RSA + linear probe (information present,
+metric blind) → probe-cost intervention (28%) → DINO-WM baseline (56%).
+
+Caveat honestly noted: this is lab scale (64², ~9M params, one seed);
+the LeWM paper reports the opposite ordering on Push-T at 224² with ~45×
+our original training budget. "At what scale does end-to-end overtake
+frozen-pretrained?" is now this repo's driving question. Contact-rich
+pusher head-to-head is running.
 
 ## Repo layout
 

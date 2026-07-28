@@ -72,13 +72,19 @@ class LatentIndex:
                 poses.append(z["qpos"][::stride])
         obs = np.concatenate(frames)
         self.qpos = np.concatenate(poses)
+        if hasattr(model, "act_proj"):                # DinoWM
+            a_dim = model.act_proj.in_features
+        else:                                          # LeWM
+            a_dim = model.action_encoder.net[0].in_features
         embs = []
         with torch.no_grad():
             for i in range(0, len(obs), batch):
                 x = torch.as_tensor(obs[i : i + batch], dtype=torch.float32,
                                     device=device).permute(0, 3, 1, 2) / 255.0
-                z = model.projector(model.encoder(x))
-                embs.append(z)
+                z, _ = model.encode(
+                    x.unsqueeze(1),
+                    torch.zeros(len(x), 1, a_dim, device=device))
+                embs.append(z[:, 0])
         self.z = torch.cat(embs)                       # (N, 192)
         print(f"[demo] latent index: {len(self.z)} frames")
 
@@ -309,19 +315,25 @@ def main() -> None:
     ap.add_argument("--data", type=str, default=None)
     ap.add_argument("--episodes", type=int, default=8,
                     help="episodes to run; best success becomes the hero")
+    ap.add_argument("--index-stride", type=int, default=2)
     ap.add_argument("--seed", type=int, default=7)
     args = ap.parse_args()
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     blob = torch.load(args.ckpt, map_location=dev)
-    model = LeWM(history=blob.get("history_len", 3),
-                 action_dim=blob.get("action_dim", 2)).to(dev).eval()
+    if blob.get("model_type") == "dinowm":
+        from .dinowm import DinoWM
+        model = DinoWM(action_dim=blob.get("action_dim", 10),
+                       history=blob.get("history_len", 3)).to(dev).eval()
+    else:
+        model = LeWM(history=blob.get("history_len", 3),
+                     action_dim=blob.get("action_dim", 2)).to(dev).eval()
     model.load_state_dict(blob["model"])
 
     env_name = args.env or blob.get("env", "reacher")
     args.data = args.data or f"data/{env_name}"
     fs = blob.get("frameskip", 1)
-    index = LatentIndex(model, args.data, dev)
+    index = LatentIndex(model, args.data, dev, stride=args.index_stride)
     env = make(env_name, seed=args.seed)
     rng = np.random.default_rng(args.seed)
 
@@ -334,9 +346,10 @@ def main() -> None:
 
     heroes = [e for e in eps if e["success"] and len(e["live"]) >= 8]
     hero = max(heroes or eps, key=lambda e: e["start_dist"])
-    _save_gif(compose_hero(hero), MEDIA / f"lewm_{env_name}_hero.gif")
+    stem = args.ckpt.stem
+    _save_gif(compose_hero(hero), MEDIA / f"{stem}_hero.gif")
     grid_eps = sorted(eps, key=lambda e: not e["success"])[:4]
-    _save_gif(compose_grid(grid_eps), MEDIA / f"lewm_{env_name}_grid.gif")
+    _save_gif(compose_grid(grid_eps), MEDIA / f"{stem}_grid.gif")
 
     if args.collapse_ckpt.exists():
         import torch as _t
