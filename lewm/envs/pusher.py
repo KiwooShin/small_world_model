@@ -171,23 +171,34 @@ class Pusher:
         mujoco.mj_forward(self.model, self.data)
 
     def sample_goal(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Goal = puck displaced 0.08-0.16 m, arm at its current pose.
-        Returns (goal_qpos, goal_obs_64, goal_puck_position)."""
-        for _ in range(100):
-            d = self.rng.uniform(0.08, 0.16)
-            th = self.rng.uniform(-np.pi, np.pi)
-            g = self.puck + d * np.array([np.cos(th), np.sin(th)])
-            if 0.07 <= np.linalg.norm(g) <= 0.20:   # keep reachable
-                break
-        goal_qpos = self.data.qpos.copy()
-        goal_qpos[2:4] = g - np.array([0.14, 0.0])
+        """Goal = an ACTUAL future state reached by the scripted push policy
+        once the puck has displaced >= 7 cm. Returns
+        (goal_qpos, goal_obs_64, goal_puck_position).
+
+        Why not 'teleport the puck, keep the arm'? Because that goal image
+        is adversarial: the cost then rewards keeping the arm at its
+        current pose, but pushing requires moving the arm away from it —
+        staying still scores better than acting. Both models cratered to
+        0-4% under that design before this was understood. A rolled-out
+        goal has a consistent arm pose (the arm that just pushed) and is
+        reachable by construction."""
         snap = self.get_state()
+        p0 = self.puck.copy()
+        goal_qpos = self.data.qpos.copy()
+        for _ in range(240):
+            self.step(self.scripted_action())
+            if np.linalg.norm(self.puck - p0) >= 0.07:
+                goal_qpos = self.data.qpos.copy()
+                break
+        else:
+            goal_qpos = self.data.qpos.copy()   # best displacement achieved
         self.data.qpos[:] = goal_qpos
         self.data.qvel[:] = 0
         mujoco.mj_forward(self.model, self.data)
         img = self.render()
+        goal_puck = self.puck.copy()
         self.set_state(snap)
-        return goal_qpos, img, g.copy()
+        return goal_qpos, img, goal_puck
 
     # ---------------------------------------------------------- data policy --
 
