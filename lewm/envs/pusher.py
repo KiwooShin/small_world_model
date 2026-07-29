@@ -12,9 +12,9 @@ Differences from the reacher, all deliberate:
   * The puck slides with damping (pushed things stop — like PushT, unlike
     an air-hockey world; makes planning consequences persistent).
   * Success is measured on the PUCK, not the fingertip: the arm is a means.
-  * Goal images show the puck at its goal with the arm at its current pose
-    (the arm's pose in the goal is a nuisance variable the planner must
-    learn to ignore — same convention as DINO-WM's PushT).
+  * Goals are rolled-out future states (see sample_goal): a goal image
+    with the arm frozen at its current pose is adversarial — the cost then
+    rewards not moving. Learned the hard way (both models at 0-4%).
 """
 
 from __future__ import annotations

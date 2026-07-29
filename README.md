@@ -13,6 +13,24 @@ them — and it beats DINO-WM on Push-T while planning up to 48× faster. Small 
 compromise — it's the interesting regime. The full argument, with sources:
 [docs/02-small-wm-frontier-2026.md](docs/02-small-wm-frontier-2026.md).
 
+## The demos
+
+![DINO-WM reacher](media/reacher_dinowm_hero.gif)
+
+*Goal-image planning, no rewards, no decoder: the planner sees only pixels; every
+imagined latent is visualized by nearest-neighbor retrieval and re-rendered. This is
+the frozen-DINOv2 patch-grid baseline on the reacher (56% success).*
+
+![LeWM pusher](media/pusher_xl12_hero.gif)
+
+*The contact task — pushing a puck to a goal-image position. Here the end-to-end
+LeWM wins (24% vs 16%): its features were trained on exactly these contact dynamics.*
+
+![collapse ablation](media/lewm_collapse.png)
+
+*The negative control, shipped: remove SIGReg (λ=0) and prediction loss "improves"
+30× — by destroying the representation. Same code, one flag.*
+
 ## Milestones
 
 | | Milestone |
@@ -43,42 +61,60 @@ Planning: encode goal image once, CEM over action sequences through latent rollo
 cost = MSE to goal latent at the last step. No decoder anywhere.
 ```
 
-## Results: the head-to-head (updated 2026-07-28, campaign day 1)
+## Results (48h campaign, 2026-07-28/29)
 
-Goal-image planning on the MuJoCo reacher: 25 episodes, success = fingertip
-within 5 cm of the goal-image pose (first passage), mean start distance
-0.19 m. All models trained on the same 2000-episode / 300k-frame offline
-dataset (LeWM: 60 epochs fs=5, prediction MSE 0.004, effective rank 48).
+Goal-image planning, 25 episodes/row, success = target within 5 cm (first
+passage), identical CEM planner and offline datasets (2000 episodes/task).
+Chance baselines ran for every protocol version; a protocol only counts when
+its zero/random floor is ~0%.
 
-| Reacher | success | mean final dist | state |
-|---|---|---|---|
-| **DINO-WM baseline** (frozen DINOv2, patch grid) | **56%** | **0.076 m** | 49×384 patch tokens |
-| LeWM + probed-point cost *(diagnostic†)* | 28% | 0.085 m | 192-d token + linear readout |
-| LeWM + GoalMSE (the paper's cost) | 12% | 0.179 m | 192-d token |
-| collapsed control (λ=0) / zero / random | 0% | ≈ start | — |
+| Reacher (pose goals, start 0.19 m) | success | mean final dist |
+|---|---|---|
+| **DINO-WM** (frozen DINOv2 patch grid) | **56%** | 0.076 m |
+| LeWM + probed-point cost *(diagnostic†)* | 28% | 0.085 m |
+| LeWM + GoalMSE (paper's cost) | 12% | 0.179 m |
+| collapsed (λ=0) / zero / random | 0% | ≈ start |
 
-† the probe needs offline state labels, so it is an upper bound, not pure
+| Pusher (contact, rolled-out goals, start 0.072 m) | success | mean final dist |
+|---|---|---|
+| **LeWM** (fs=5, 12 ep) | **24%** | 0.066 m |
+| DINO-WM | 16% | 0.066 m |
+| zero baseline | 0% | 0.072 m |
+
+† linear probe trained on offline state labels — an upper bound, not pure
 goal-image planning.
 
-**The finding.** LeWM's latent *contains* the state — a linear probe reads
-the fingertip position to 1.5 cm median error — but **GoalMSE cannot see
-it**: SIGReg whitens the space, latent distance decorrelates from task
-distance beyond ~5 cm (corr 0.35 → ~0.0), and the planner gets no gradient
-toward distant goals. Identical machinery with a probed-point cost halves
-the final distance (0.179 → 0.085 m). DINO-WM's spatially-structured patch
-grid is the natural fix — feature-MSE over patches preserves *where things
-are* — and wins outright at this scale. Chain of evidence that localized
-this (each step committed with its pipeline): honest-eval rebuild with
-chance baselines → 5-config CEM sweep (flat: planner exonerated) →
-open-loop rollout drift measurement (13% of random-pair distance at 8
-steps: dynamics exonerated) → RSA + linear probe (information present,
-metric blind) → probe-cost intervention (28%) → DINO-WM baseline (56%).
+**Finding 1 — the whitened-latent blind spot.** LeWM's latent *contains* the
+state (linear probe: fingertip to 1.5 cm) but GoalMSE can't see it: SIGReg
+whitens the space and latent distance decorrelates from task distance beyond
+~5 cm (corr 0.35 → ~0.0). Evidence chain, each step committed: chance-floor
+eval rebuild → 5-config CEM sweep (flat — planner exonerated) → rollout-drift
+measurement (13% of random-pair distance at 8 steps — dynamics exonerated) →
+RSA + probe (information present, metric blind) → probe-cost intervention
+(12%→28%, distance halved) → DINO-WM baseline (56%: spatial patch structure
+is what GoalMSE needs).
 
-Caveat honestly noted: this is lab scale (64², ~9M params, one seed);
-the LeWM paper reports the opposite ordering on Push-T at 224² with ~45×
-our original training budget. "At what scale does end-to-end overtake
-frozen-pretrained?" is now this repo's driving question. Contact-rich
-pusher head-to-head is running.
+**Finding 2 — the crossover on contact.** The ordering flips on the pusher:
+LeWM 24% > DINO-WM 16% (n=25, one seed — suggestive, not significant).
+Consistent with the end-to-end thesis: features trained on the task's own
+contact dynamics vs a generic pretrained prior.
+
+**Finding 3 — evals lie by default.** Three protocol bugs each produced
+plausible-looking numbers before being caught by controls: goals spawning
+inside the success radius (every policy scored 100%), an MJCF degree-default
+clamping the elbow to ±2.6° (goal images showed physically unreachable
+poses), and goal images with the arm frozen at its current pose (cost
+rewards not moving; both models cratered to 0-4%). The zero/random rows
+stay in every table because they are what caught these.
+
+**Efficiency** (single DGX Spark GB10, BF16, GPU-verified EGL rendering):
+
+| | LeWM | DINO-WM baseline |
+|---|---|---|
+| trainable params | 8.75M (end-to-end) | ~11M head (22M frozen) |
+| state per frame | one 192-d token | 49×384 patch grid |
+| train (2000 eps) | ~50 min / 60 epochs | ~40 min / 10 epochs |
+| CEM planning state | 192-d (fast) | 18.8k-d (~5× slower rollouts) |
 
 ## Repo layout
 
