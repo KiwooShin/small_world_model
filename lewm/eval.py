@@ -154,6 +154,7 @@ def main() -> None:
     ap.add_argument("--cost-steps", type=int, default=1)
     ap.add_argument("--warm", action="store_true")
     ap.add_argument("--replan", type=int, default=None)
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--gif", action="store_true", default=True)
     args = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -172,7 +173,8 @@ def main() -> None:
                     cost_steps=args.cost_steps)
     evaluate(model, env_name=env_name, episodes=args.episodes, device=dev,
              frameskip=blob.get("frameskip", 1), replan_every=args.replan,
-             gif_tag=tag, baseline=args.baseline, cem=cem, warm=args.warm)
+             seed=args.seed, gif_tag=tag, baseline=args.baseline, cem=cem,
+             warm=args.warm)
 
 
 if __name__ == "__main__":
