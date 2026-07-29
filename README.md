@@ -36,9 +36,9 @@ LeWM wins (24% vs 16%): its features were trained on exactly these contact dynam
 | | Milestone |
 |---|---|
 | ✅ | **M0** — study foundation: field map, reading path, research sweep ([docs/](docs/)) |
-| 🔨 | **M1** — LeWM from scratch on a simple MuJoCo task ([lewm/](lewm/)): train, plan, score |
-| ⬜ | **M2** — scale the task ladder: reacher → pushing → Franka/Unitree assembly scenes |
-| ⬜ | **M3** — the open question: LeWM vs DINO-WM on contact-rich manipulation, same data, same CEM protocol |
+| ✅ | **M1** — LeWM from scratch on MuJoCo ([lewm/](lewm/)): train, plan, score, ablate |
+| ✅ | **M2** — task ladder: reacher → contact pushing (frame-skip blocks, honest protocols) |
+| ✅ | **M3** — LeWM vs DINO-WM head-to-head, same data, same CEM protocol (results above; Franka/Unitree scenes next) |
 | ⬜ | **M4** — V-JEPA 2-AC-style post-training on our own robot data |
 | ⬜ | **M5** — LoRA a pretrained generative WM → photoreal robot dreams |
 
