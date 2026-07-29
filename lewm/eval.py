@@ -59,7 +59,10 @@ def evaluate(model: LeWM, env_name: str = "reacher", episodes: int = 25,
             blocks.append(blk.reshape(-1))
         blocks.append(np.zeros(fs * a_raw, dtype=np.float32))  # placeholder
 
-        _, goal_img, goal_pt = env.sample_goal()
+        for _ in range(4):                     # guard: goal must be nontrivial
+            _, goal_img, goal_pt = env.sample_goal()
+            if np.linalg.norm(env.target_point - goal_pt) >= success_dist + 0.015:
+                break
         start_dists.append(float(np.linalg.norm(env.target_point - goal_pt)))
 
         ep_frames = []

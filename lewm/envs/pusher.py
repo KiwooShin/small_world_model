@@ -184,14 +184,18 @@ class Pusher:
         reachable by construction."""
         snap = self.get_state()
         p0 = self.puck.copy()
-        goal_qpos = self.data.qpos.copy()
-        for _ in range(240):
-            self.step(self.scripted_action())
-            if np.linalg.norm(self.puck - p0) >= 0.07:
-                goal_qpos = self.data.qpos.copy()
+        goal_qpos = None
+        for _attempt in range(3):               # retry until a real push lands
+            for _ in range(300):
+                self.step(self.scripted_action())
+                if np.linalg.norm(self.puck - p0) >= 0.07:
+                    goal_qpos = self.data.qpos.copy()
+                    break
+            if goal_qpos is not None:
                 break
-        else:
-            goal_qpos = self.data.qpos.copy()   # best displacement achieved
+            self.set_state(snap)                # fresh attempt, fresh policy noise
+        if goal_qpos is None:
+            goal_qpos = self.data.qpos.copy()   # give up gracefully (rare)
         self.data.qpos[:] = goal_qpos
         self.data.qvel[:] = 0
         mujoco.mj_forward(self.model, self.data)
