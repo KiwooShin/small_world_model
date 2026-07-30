@@ -19,12 +19,13 @@ compromise — it's the interesting regime. The full argument, with sources:
 
 *Goal-image planning, no rewards, no decoder: the planner sees only pixels; every
 imagined latent is visualized by nearest-neighbor retrieval and re-rendered. This is
-the frozen-DINOv2 patch-grid baseline on the reacher (56% success).*
+the frozen-DINOv2 patch-grid baseline on the reacher (40±11% over 4 seeds).*
 
 ![LeWM pusher](media/pusher_xl12_hero.gif)
 
 *The contact task — pushing a puck to a goal-image position. Here the end-to-end
-LeWM wins (24% vs 16%): its features were trained on exactly these contact dynamics.*
+LeWM wins (30±5% vs 19±7%, all 4 seeds): its features were trained on exactly
+these contact dynamics.*
 
 ![collapse ablation](media/lewm_collapse.png)
 
@@ -68,17 +69,17 @@ passage), identical CEM planner and offline datasets (2000 episodes/task).
 Chance baselines ran for every protocol version; a protocol only counts when
 its zero/random floor is ~0%.
 
-| Reacher (pose goals, start 0.19 m) | success | mean final dist |
+| Reacher (pose goals, start 0.19 m) | success (4 seeds) | mean final dist |
 |---|---|---|
-| **DINO-WM** (frozen DINOv2 patch grid) | **56%** | 0.076 m |
-| LeWM + probed-point cost *(diagnostic†)* | 28% | 0.085 m |
-| LeWM + GoalMSE (paper's cost) | 12% | 0.179 m |
+| **DINO-WM** (frozen DINOv2 patch grid) | **40% ± 11** | 0.076–0.102 m |
+| LeWM + probed-point cost *(diagnostic†)* | 28% (1 seed) | 0.085 m |
+| LeWM + GoalMSE (paper's cost) | 12% (1 seed) | 0.179 m |
 | collapsed (λ=0) / zero / random | 0% | ≈ start |
 
-| Pusher (contact, rolled-out goals, start 0.072 m) | success | mean final dist |
+| Pusher (contact, rolled-out goals, start 0.072 m) | success (4 seeds) | mean final dist |
 |---|---|---|
-| **LeWM** (fs=5, 12 ep) | **24%** | 0.066 m |
-| DINO-WM | 16% | 0.066 m |
+| **LeWM** (fs=5, 12 ep) | **30% ± 5** | 0.066 m |
+| DINO-WM | 19% ± 7 | 0.066 m |
 | zero baseline | 0% | 0.072 m |
 
 † linear probe trained on offline state labels — an upper bound, not pure
@@ -95,9 +96,11 @@ RSA + probe (information present, metric blind) → probe-cost intervention
 is what GoalMSE needs).
 
 **Finding 2 — the crossover on contact.** The ordering flips on the pusher:
-LeWM 24% > DINO-WM 16% (n=25, one seed — suggestive, not significant).
-Consistent with the end-to-end thesis: features trained on the task's own
-contact dynamics vs a generic pretrained prior.
+LeWM 30±5% > DINO-WM 19±7%, and LeWM wins in **all 4 seed pairs**
+(24/16, 32/20, 28/12, 36/28). Consistent with the end-to-end thesis:
+features trained on the task's own contact dynamics beat a generic
+pretrained prior where contact matters — while the pretrained patch grid
+dominates on gross pose matching (reacher, 40±11% vs 12%).
 
 **Finding 3 — evals lie by default.** Three protocol bugs each produced
 plausible-looking numbers before being caught by controls: goals spawning
